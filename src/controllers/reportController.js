@@ -302,11 +302,122 @@ const getDashboardSummary = async (req, res) => {
   }
 };
 
+// @desc    Estadísticas Históricas Totales
+// @route   GET /api/reports/historical
+const getHistoricalStats = async (req, res) => {
+  try {
+    // 1. Facturación y Ganancia Histórica
+    const salesStats = await Sale.aggregate([
+      { $match: { estado: 'completada' } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          totalFinal: { $first: '$totalFinal' },
+          costoVenta: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalFacturado: { $sum: '$totalFinal' },
+          totalCosto: { $sum: '$costoVenta' },
+          totalVentas: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const historical = salesStats[0] || { totalFacturado: 0, totalCosto: 0, totalVentas: 0 };
+    const gananciaHistorica = historical.totalFacturado - historical.totalCosto;
+
+    // 2. Stock Actual y Valorización
+    const products = await Product.find({ activo: true });
+    let totalItemsStock = 0;
+    let valorStockCompra = 0;
+    let valorStockVenta = 0;
+    let productosBajoStock = 0;
+
+    products.forEach(p => {
+      totalItemsStock += p.stock;
+      valorStockCompra += (p.stock * p.precioCompra);
+      valorStockVenta += (p.stock * p.precioVenta);
+      if (p.stock <= p.stockMinimo) productosBajoStock++;
+    });
+
+    // 3. Ventas por Mes (Evolución histórica)
+    const ventasPorMes = await Sale.aggregate([
+      { $match: { estado: 'completada' } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m', date: '$fecha' } },
+          monto: { $sum: '$totalFinal' },
+          cantidad: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // 4. Ventas por Categoría (Histórico)
+    const ventasPorCategoria = await Sale.aggregate([
+      { $match: { estado: 'completada' } },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.producto',
+          foreignField: '_id',
+          as: 'prodInfo'
+        }
+      },
+      { $unwind: '$prodInfo' },
+      {
+        $lookup: {
+          from: 'categories',
+          localField: 'prodInfo.categoria',
+          foreignField: '_id',
+          as: 'catInfo'
+        }
+      },
+      { $unwind: '$catInfo' },
+      {
+        $group: {
+          _id: '$catInfo.nombre',
+          monto: { $sum: '$items.subtotal' },
+          cantidad: { $sum: '$items.cantidad' }
+        }
+      },
+      { $sort: { monto: -1 } }
+    ]);
+
+    res.json({
+      totales: {
+        facturacionHistorica: historical.totalFacturado,
+        gananciaHistorica,
+        ventasHistoricas: historical.totalVentas,
+      },
+      stock: {
+        totalItems: totalItemsStock,
+        valorCompra: valorStockCompra,
+        valorVenta: valorStockVenta,
+        productosBajoStock,
+        gananciaPotencial: valorStockVenta - valorStockCompra
+      },
+      evolucionMensual: ventasPorMes,
+      distribucionCategorias: ventasPorCategoria
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error al obtener estadísticas históricas' });
+  }
+};
+
 module.exports = {
   getDailyReport,
   getWeeklyReport,
   getMonthlyReport,
   getAnnualReport,
   getTopProductsReport,
-  getDashboardSummary
+  getDashboardSummary,
+  getHistoricalStats
 };
