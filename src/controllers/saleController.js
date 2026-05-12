@@ -12,13 +12,18 @@ const getSales = async (req, res) => {
     const { startDate, endDate, empleado, metodoPago } = req.query;
     let query = {};
 
+    const tz = '-03:00'; // Argentina
+    
     if (startDate && endDate) {
       query.fecha = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
+        $gte: new Date(`${startDate}T00:00:00.000${tz}`),
+        $lte: new Date(`${endDate}T23:59:59.999${tz}`)
       };
     } else if (startDate) {
-      query.fecha = { $gte: new Date(startDate) };
+      query.fecha = { 
+        $gte: new Date(`${startDate}T00:00:00.000${tz}`),
+        $lte: new Date(`${startDate}T23:59:59.999${tz}`) // Si solo hay una fecha, buscamos ese dia
+      };
     }
 
     if (empleado) query.empleado = empleado;

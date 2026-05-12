@@ -1,4 +1,5 @@
-require('dotenv').config();
+require('dotenv').config(); // Configuración de variables de entorno
+
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');

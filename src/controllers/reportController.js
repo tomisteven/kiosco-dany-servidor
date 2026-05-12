@@ -5,41 +5,48 @@ const Product = require('../models/Product');
 // Helper para obtener el rango de fechas según el período
 const getDateRange = (period, dateStr, yearStr, monthStr) => {
   let start, end;
-  const now = new Date();
+  const tz = '-03:00'; // Offset fijo para Argentina
+  
+  const getTodayAR = () => {
+    return new Date().toLocaleDateString("en-CA", { timeZone: 'America/Argentina/Buenos_Aires' });
+  };
+
+  const nowAR = getTodayAR();
 
   switch (period) {
     case 'daily':
-      if (dateStr) {
-        const [y, m, d] = dateStr.split('-');
-        start = new Date(y, m - 1, d, 0, 0, 0, 0);
-      } else {
-        start = new Date(now.setHours(0, 0, 0, 0));
-      }
-      end = new Date(start);
-      end.setHours(23, 59, 59, 999);
+      const dStr = dateStr || nowAR;
+      start = new Date(`${dStr}T00:00:00.000${tz}`);
+      end = new Date(`${dStr}T23:59:59.999${tz}`);
       break;
     case 'weekly':
-      if (dateStr) {
-        const [y, m, d] = dateStr.split('-');
-        start = new Date(y, m - 1, d, 0, 0, 0, 0);
-      } else {
-        start = new Date(now.setDate(now.getDate() - now.getDay()));
-        start.setHours(0, 0, 0, 0);
-      }
-      end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
+      let baseDateStr = dateStr || nowAR;
+      let baseDate = new Date(`${baseDateStr}T00:00:00.000${tz}`);
+      const day = baseDate.getDay(); 
+      const diff = baseDate.getDate() - day + (day === 0 ? -6 : 1);
+      const mondayDate = new Date(baseDate.setDate(diff));
+      const mondayStr = mondayDate.toLocaleDateString("en-CA", { timeZone: 'America/Argentina/Buenos_Aires' });
+      
+      const sundayDate = new Date(mondayDate);
+      sundayDate.setDate(mondayDate.getDate() + 6);
+      const sundayStr = sundayDate.toLocaleDateString("en-CA", { timeZone: 'America/Argentina/Buenos_Aires' });
+
+      start = new Date(`${mondayStr}T00:00:00.000${tz}`);
+      end = new Date(`${sundayStr}T23:59:59.999${tz}`);
       break;
     case 'monthly':
-      const y = yearStr ? parseInt(yearStr) : now.getFullYear();
-      const m = monthStr ? parseInt(monthStr) - 1 : now.getMonth();
-      start = new Date(y, m, 1);
-      end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+      const y = yearStr ? parseInt(yearStr) : parseInt(nowAR.split('-')[0]);
+      const m = monthStr ? parseInt(monthStr) : parseInt(nowAR.split('-')[1]);
+      const mStr = String(m).padStart(2, '0');
+      
+      start = new Date(`${y}-${mStr}-01T00:00:00.000${tz}`);
+      const lastDay = new Date(y, m, 0).getDate();
+      end = new Date(`${y}-${mStr}-${String(lastDay).padStart(2, '0')}T23:59:59.999${tz}`);
       break;
     case 'annual':
-      const yr = yearStr ? parseInt(yearStr) : now.getFullYear();
-      start = new Date(yr, 0, 1);
-      end = new Date(yr, 11, 31, 23, 59, 59, 999);
+      const yr = yearStr ? parseInt(yearStr) : parseInt(nowAR.split('-')[0]);
+      start = new Date(`${yr}-01-01T00:00:00.000${tz}`);
+      end = new Date(`${yr}-12-31T23:59:59.999${tz}`);
       break;
     default:
       start = new Date(0);
@@ -216,12 +223,15 @@ const getTopProductsReport = async (req, res) => {
 // @route   GET /api/reports/summary
 const getDashboardSummary = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const tz = '-03:00';
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: 'America/Argentina/Buenos_Aires' });
+    
+    const startOfDay = new Date(`${todayStr}T00:00:00.000${tz}`);
+    const endOfDay = new Date(`${todayStr}T23:59:59.999${tz}`);
 
     const matchStage = {
       $match: {
-        fecha: { $gte: today },
+        fecha: { $gte: startOfDay, $lte: endOfDay },
         estado: 'completada'
       }
     };
