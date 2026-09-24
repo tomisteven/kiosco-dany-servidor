@@ -6,6 +6,7 @@ const {
   getMonthlyReport,
   getAnnualReport,
   getCustomRangeReport,
+  getBusinessDaysReport,
   getTopProductsReport,
   getDashboardSummary,
   getHistoricalStats
@@ -17,6 +18,7 @@ router.get('/weekly', protect, getWeeklyReport);
 router.get('/monthly', protect, getMonthlyReport);
 router.get('/annual', protect, getAnnualReport);
 router.get('/custom', protect, getCustomRangeReport);
+router.get('/business-days', protect, admin, getBusinessDaysReport);
 router.get('/historical', protect, admin, getHistoricalStats);
 router.get('/top-products', protect, getTopProductsReport);
 router.get('/summary', protect, getDashboardSummary);

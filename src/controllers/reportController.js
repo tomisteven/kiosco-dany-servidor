@@ -121,6 +121,82 @@ const buildReportAggregation = async (startDate, endDate, groupByFormat) => {
   };
 };
 
+const buildBusinessDayAggregation = async (startDate, endDate) => {
+  const businessDayMatchStage = {
+    $match: {
+      fecha: { $gte: startDate, $lte: endDate },
+      estado: 'completada',
+      $expr: {
+        $ne: [
+          {
+            $dayOfWeek: {
+              date: '$fecha',
+              timezone: 'America/Argentina/Buenos_Aires'
+            }
+          },
+          1
+        ]
+      }
+    }
+  };
+
+  const timeline = await Sale.aggregate([
+    businessDayMatchStage,
+    {
+      $unwind: '$items'
+    },
+    {
+      $group: {
+        _id: '$_id',
+        totalFinal: { $first: '$totalFinal' },
+        metodoPago: { $first: '$metodoPago' },
+        fecha: { $first: '$fecha' },
+        costoVenta: { $sum: { $multiply: ['$items.precioCompraHisto', '$items.cantidad'] } }
+      }
+    },
+    {
+      $group: {
+        _id: {
+          $dateToString: {
+            format: '%Y-%m-%d',
+            date: '$fecha',
+            timezone: 'America/Argentina/Buenos_Aires'
+          }
+        },
+        totalVentas: { $sum: 1 },
+        montoTotal: { $sum: '$totalFinal' },
+        costoTotal: { $sum: '$costoVenta' }
+      }
+    },
+    {
+      $project: {
+        totalVentas: 1,
+        montoTotal: 1,
+        costoTotal: 1,
+        gananciaNeta: { $subtract: ['$montoTotal', '$costoTotal'] },
+        ticketPromedio: { $divide: ['$montoTotal', { $cond: [{ $eq: ['$totalVentas', 0] }, 1, '$totalVentas'] }] }
+      }
+    },
+    { $sort: { _id: 1 } }
+  ]);
+
+  const paymentMethods = await Sale.aggregate([
+    businessDayMatchStage,
+    {
+      $group: {
+        _id: '$metodoPago',
+        total: { $sum: '$totalFinal' },
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  return {
+    timeline,
+    paymentMethods
+  };
+};
+
 const getReport = async (req, res, period, groupByFormat, useCustomRange = false) => {
   try {
     const { date, year, month, startDate, endDate } = req.query;
@@ -190,6 +266,48 @@ const getAnnualReport = (req, res) => getReport(req, res, 'annual', '%Y-%m'); //
 // @desc    Reporte por rango exacto
 // @route   GET /api/reports/custom
 const getCustomRangeReport = (req, res) => getReport(req, res, 'custom', null, true);
+
+// @desc    Reporte mensual de días hábiles (lunes a sábado)
+// @route   GET /api/reports/business-days
+const getBusinessDaysReport = async (req, res) => {
+  try {
+    const { year, month } = req.query;
+    const { start, end } = getDateRange('monthly', {
+      yearStr: year,
+      monthStr: month,
+    });
+
+    const stats = await buildBusinessDayAggregation(start, end);
+
+    let totalVentas = 0;
+    let montoTotal = 0;
+    let costoTotal = 0;
+
+    stats.timeline.forEach((t) => {
+      totalVentas += t.totalVentas;
+      montoTotal += t.montoTotal;
+      costoTotal += t.costoTotal;
+    });
+
+    const gananciaNeta = montoTotal - costoTotal;
+    const ticketPromedio = totalVentas > 0 ? montoTotal / totalVentas : 0;
+
+    res.json({
+      periodo: { start, end, year, month },
+      totales: {
+        totalVentas,
+        montoTotal,
+        costoTotal,
+        gananciaNeta,
+        ticketPromedio,
+      },
+      ventasPorMetodoPago: stats.paymentMethods,
+      timeline: stats.timeline,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al generar reporte de días hábiles' });
+  }
+};
 
 // @desc    Top Productos Vendidos
 // @route   GET /api/reports/top-products
@@ -467,6 +585,7 @@ module.exports = {
   getMonthlyReport,
   getAnnualReport,
   getCustomRangeReport,
+  getBusinessDaysReport,
   getTopProductsReport,
   getDashboardSummary,
   getHistoricalStats
