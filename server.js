@@ -15,9 +15,6 @@ const saleRoutes = require('./src/routes/saleRoutes');
 const stockRoutes = require('./src/routes/stockRoutes');
 const reportRoutes = require('./src/routes/reportRoutes');
 
-// Conectar a Base de Datos
-connectDB();
-
 const app = express();
 
 // Middlewares
@@ -46,10 +43,21 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`Servidor corriendo en el puerto ${PORT}`);
-  });
-}
+const startServer = async () => {
+  try {
+    await connectDB();
+
+    if (process.env.NODE_ENV !== 'production') {
+      app.listen(PORT, () => {
+        console.log(`Servidor corriendo en el puerto ${PORT}`);
+      });
+    }
+  } catch (error) {
+    console.error('No se pudo iniciar el servidor por un error de base de datos.');
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = app;

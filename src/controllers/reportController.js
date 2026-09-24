@@ -3,7 +3,7 @@ const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 
 // Helper para obtener el rango de fechas según el período
-const getDateRange = (period, dateStr, yearStr, monthStr) => {
+const getDateRange = (period, { dateStr, yearStr, monthStr, startDateStr, endDateStr } = {}) => {
   let start, end;
   const tz = '-03:00'; // Offset fijo para Argentina
   
@@ -12,6 +12,12 @@ const getDateRange = (period, dateStr, yearStr, monthStr) => {
   };
 
   const nowAR = getTodayAR();
+
+  if (startDateStr && endDateStr) {
+    start = new Date(`${startDateStr}T00:00:00.000${tz}`);
+    end = new Date(`${endDateStr}T23:59:59.999${tz}`);
+    return { start, end, isExactRange: true, isSingleDay: startDateStr === endDateStr };
+  }
 
   switch (period) {
     case 'daily':
@@ -52,7 +58,8 @@ const getDateRange = (period, dateStr, yearStr, monthStr) => {
       start = new Date(0);
       end = new Date();
   }
-  return { start, end };
+
+  return { start, end, isExactRange: false, isSingleDay: false };
 };
 
 const buildReportAggregation = async (startDate, endDate, groupByFormat) => {
@@ -114,12 +121,24 @@ const buildReportAggregation = async (startDate, endDate, groupByFormat) => {
   };
 };
 
-const getReport = async (req, res, period, groupByFormat) => {
+const getReport = async (req, res, period, groupByFormat, useCustomRange = false) => {
   try {
-    const { date, year, month } = req.query;
-    const { start, end } = getDateRange(period, date, year, month);
+    const { date, year, month, startDate, endDate } = req.query;
+    const range = getDateRange(period, {
+      dateStr: date,
+      yearStr: year,
+      monthStr: month,
+      startDateStr: startDate,
+      endDateStr: endDate,
+    });
 
-    const stats = await buildReportAggregation(start, end, groupByFormat);
+    const start = range.start;
+    const end = range.end;
+    const effectiveGroupByFormat = useCustomRange
+      ? (range.isSingleDay ? '%H' : '%Y-%m-%d')
+      : groupByFormat;
+
+    const stats = await buildReportAggregation(start, end, effectiveGroupByFormat);
 
     // Sumario total (ya que timeline puede venir separado por dias/horas)
     let totalVentas = 0;
@@ -168,12 +187,22 @@ const getMonthlyReport = (req, res) => getReport(req, res, 'monthly', '%Y-%m-%d'
 // @route   GET /api/reports/annual
 const getAnnualReport = (req, res) => getReport(req, res, 'annual', '%Y-%m'); // Agrupa por mes
 
+// @desc    Reporte por rango exacto
+// @route   GET /api/reports/custom
+const getCustomRangeReport = (req, res) => getReport(req, res, 'custom', null, true);
+
 // @desc    Top Productos Vendidos
 // @route   GET /api/reports/top-products
 const getTopProductsReport = async (req, res) => {
   try {
-    const { period, date, year, month } = req.query;
-    const { start, end } = getDateRange(period || 'monthly', date, year, month);
+    const { period, date, year, month, startDate, endDate } = req.query;
+    const { start, end } = getDateRange(period || 'monthly', {
+      dateStr: date,
+      yearStr: year,
+      monthStr: month,
+      startDateStr: startDate,
+      endDateStr: endDate,
+    });
 
     const topProducts = await Sale.aggregate([
       {
@@ -316,9 +345,19 @@ const getDashboardSummary = async (req, res) => {
 // @route   GET /api/reports/historical
 const getHistoricalStats = async (req, res) => {
   try {
+    const { startDate, endDate } = req.query;
+    const range = getDateRange('custom', {
+      startDateStr: startDate,
+      endDateStr: endDate,
+    });
+
+    const dateMatch = (startDate && endDate)
+      ? { fecha: { $gte: range.start, $lte: range.end } }
+      : {};
+
     // 1. Facturación y Ganancia Histórica
     const salesStats = await Sale.aggregate([
-      { $match: { estado: 'completada' } },
+      { $match: { estado: 'completada', ...dateMatch } },
       { $unwind: '$items' },
       {
         $group: {
@@ -356,7 +395,7 @@ const getHistoricalStats = async (req, res) => {
 
     // 3. Ventas por Mes (Evolución histórica)
     const ventasPorMes = await Sale.aggregate([
-      { $match: { estado: 'completada' } },
+      { $match: { estado: 'completada', ...dateMatch } },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m', date: '$fecha' } },
@@ -369,7 +408,7 @@ const getHistoricalStats = async (req, res) => {
 
     // 4. Ventas por Categoría (Histórico)
     const ventasPorCategoria = await Sale.aggregate([
-      { $match: { estado: 'completada' } },
+      { $match: { estado: 'completada', ...dateMatch } },
       { $unwind: '$items' },
       {
         $lookup: {
@@ -427,6 +466,7 @@ module.exports = {
   getWeeklyReport,
   getMonthlyReport,
   getAnnualReport,
+  getCustomRangeReport,
   getTopProductsReport,
   getDashboardSummary,
   getHistoricalStats
